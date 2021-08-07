@@ -1,0 +1,7 @@
+#Include Libraries As Follows:
+
+ssl
+crypto
+gdi32
+crypt32
+ws2_32
