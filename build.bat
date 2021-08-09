@@ -10,6 +10,8 @@ set GPP=g++
 set OUTPUT=program.exe
 set DEBUGMODE=1
 
+set REBUILD_LIBRARIES=0
+
 set LINK_ONLY=0
 set VERBOSE=0
 
@@ -44,9 +46,25 @@ if %ASYNC_BUILD% GTR 0 (
 
 del /S /Q ".objs64\*" 2>nul
 
+if %REBUILD_LIBRARIES% GTR 0 (
+	del /S /Q "libraries\*.o" 2>nul
+)
+
 if not exist .objs64 (
 	echo Creating Object Directory Structure...
 	mkdir .objs64
+)
+
+echo Building Libraries...
+for %%F in (libraries\*.cpp) do (
+	if not exist libraries\%%~nF.o (
+		echo Building %%~nF.o
+		start /B %WAIT% "%%~nF.o" %CPP% %ADDITIONAL_INCLUDEDIRS% %COMPILER_FLAGS% %DEBUG_INFO% -c %%F -o libraries\%%~nF.o
+
+		if %VERBOSE% GTR 0 (
+			echo %CPP% %ADDITIONAL_INCLUDEDIRS% %COMPILER_FLAGS% %DEBUG_INFO% -c %%F -o libraries\%%~nF.o
+		)
+	)
 )
 
 echo Building API Files...
@@ -75,6 +93,7 @@ if %count%==0 (
 
 set "files="
 for /f "delims=" %%A in ('dir /b /a-d ".objs64\%*" ') do set "files=!files! .objs64\%%A"
+for /f "delims=" %%A in ('dir /b /a-d "libraries\*.o" ') do set "files=!files! libraries\%%A"
 
 :link
 echo Linking Executable...

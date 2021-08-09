@@ -1,0 +1,17 @@
+[ req ]
+prompt=no
+default_bits       = 4096
+distinguished_name = req_distinguished_name
+[ req_distinguished_name ]
+countryName                 =US
+stateOrProvinceName         =.
+localityName               =.
+organizationName           =github.com/jmscreation
+commonName                 =jmscreation-TestCA
+
+[ ca ]
+# X509 extensions for a ca
+keyUsage                = critical, cRLSign, keyCertSign
+basicConstraints        = CA:TRUE, pathlen:0
+subjectKeyIdentifier    = hash
+authorityKeyIdentifier  = keyid:always,issuer:always

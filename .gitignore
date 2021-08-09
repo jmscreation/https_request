@@ -30,3 +30,10 @@
 *.exe
 *.out
 *.app
+
+#Private Key CA
+certs/*.key
+
+#Allow
+!libraries/openssl/lib/*.a
+!libraries/*.a

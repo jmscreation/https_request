@@ -1,0 +1,6 @@
+@echo off
+echo Generate Key...
+openssl genrsa -out CA.key 4096
+
+echo Generate Root Certificate...
+openssl req -x509 -sha256 -nodes -new -key CA.key -days 9000 -out CA.pem -config caconfig.cnf
