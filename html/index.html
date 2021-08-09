@@ -1,0 +1,22 @@
+<html>
+<head>
+	<script type="text/javascript">
+
+
+xhttp = new XMLHttpRequest();
+xhttp.open("POST", "/api", true);
+xhttp.setRequestHeader("Content-type", "text/api-request");
+xhttp.onreadystatechange = function() {
+  if (this.readyState == 4 && this.status == 200) {
+    console.log(this.responseText);
+  }
+};
+xhttp.send("data=TestData");
+
+
+	</script>
+</head>
+<body>
+Content
+</body>
+</html>

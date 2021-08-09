@@ -5,6 +5,7 @@
 #include "httplib.h"
 
 #include "windows.h"
+#include "jsonloader.h"
 
 
 std::string Client(const std::string& host, const std::string& path) {
@@ -32,6 +33,40 @@ std::string Client(const std::string& host, const std::string& path) {
     return rvalue;
 }
 
+
+struct ResponseMessage {
+    int id;
+    std::string info;
+};
+
+std::string Serialize(const ResponseMessage& msg) {
+    rapidjson::Document doc;
+
+    doc.SetObject();
+
+    doc.AddMember("info", rapidjson::Value(rapidjson::StringRef(msg.info.data())).Move(), doc.GetAllocator());
+    doc.AddMember("id", rapidjson::Value(msg.id).Move(), doc.GetAllocator());
+
+
+    rapidjson::StringBuffer buf;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buf);
+    doc.Accept(writer);
+
+    std::string result(buf.GetString(), buf.GetSize());
+
+    return result;
+}
+
+bool GetResponse(const std::string& request, std::string& response) {
+    ResponseMessage msg;
+    msg.id = 100;
+    msg.info = "Test Information";
+
+    response = Serialize(msg);
+
+    return true;
+}
+
 void Server() {
     httplib::SSLServer server("certs/server.pem", "certs/server.key");
 
@@ -43,9 +78,25 @@ void Server() {
         return httplib::SSLServer::HandlerResponse::Unhandled;
     });
 
-    server.Get("/", [](const httplib::Request &req, httplib::Response &res){
-        res.set_content("unknown", "text/plain");
+    server.Post("/api", [](const httplib::Request &req, httplib::Response &res){
+
+        if(req.get_header_value("Content-Type") != "text/api-request"){
+            res.status = 404;
+            return httplib::SSLServer::HandlerResponse::Handled;
+        }
+        
+        std::string response;
+
+        if(!GetResponse(req.body, response)){
+            res.status = 500;
+            return httplib::SSLServer::HandlerResponse::Handled;
+        }
+
+        res.set_content(response, "text/api-response");
+        return httplib::SSLServer::HandlerResponse::Handled;
     });
+
+    server.set_mount_point("/", "./html");
 
     server.listen("0.0.0.0", 443);
 
