@@ -37,6 +37,7 @@ std::string Client(const std::string& host, const std::string& path) {
 struct ResponseMessage {
     int id;
     std::string info;
+    std::string request;
 };
 
 std::string Serialize(const ResponseMessage& msg) {
@@ -45,6 +46,7 @@ std::string Serialize(const ResponseMessage& msg) {
     doc.SetObject();
 
     doc.AddMember("info", rapidjson::Value(rapidjson::StringRef(msg.info.data())).Move(), doc.GetAllocator());
+    doc.AddMember("request", rapidjson::Value(rapidjson::StringRef(msg.request.data())).Move(), doc.GetAllocator());
     doc.AddMember("id", rapidjson::Value(msg.id).Move(), doc.GetAllocator());
 
 
@@ -61,8 +63,11 @@ bool GetResponse(const std::string& request, std::string& response) {
     ResponseMessage msg;
     msg.id = 100;
     msg.info = "Test Information";
+    msg.request = request;
 
     response = Serialize(msg);
+
+    std::cout << response << "\n";
 
     return true;
 }
