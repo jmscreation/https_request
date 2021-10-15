@@ -9,10 +9,6 @@
 #include "sqlite3.h"
 
 
-void InitDatabase() {
-    //sqlite3_open();
-}
-
 std::string Client(const std::string& host, const std::string& path) {
     std::string rvalue;
     httplib::SSLClient client(host.data(), 443);

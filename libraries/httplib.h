@@ -178,7 +178,9 @@ using socket_t = SOCKET;
 #include <unistd.h>
 
 using socket_t = int;
+#ifndef INVALID_SOCKET
 #define INVALID_SOCKET (-1)
+#endif
 #endif //_WIN32
 
 #include <algorithm>
@@ -580,23 +582,7 @@ using Logger = std::function<void(const Request &, const Response &)>;
 
 using SocketOptions = std::function<void(socket_t sock)>;
 
-inline void default_socket_options(socket_t sock) {
-  int yes = 1;
-#ifdef _WIN32
-  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<char *>(&yes),
-             sizeof(yes));
-  setsockopt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
-             reinterpret_cast<char *>(&yes), sizeof(yes));
-#else
-#ifdef SO_REUSEPORT
-  setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, reinterpret_cast<void *>(&yes),
-             sizeof(yes));
-#else
-  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<void *>(&yes),
-             sizeof(yes));
-#endif
-#endif
-}
+void default_socket_options(socket_t sock);
 
 class Server {
 public:
@@ -636,7 +622,7 @@ public:
   Server &Options(const std::string &pattern, Handler handler);
 
   bool set_base_dir(const std::string &dir,
-                    const std::string &mount_point = nullptr);
+                    const std::string &mount_point = std::string());
   bool set_mount_point(const std::string &mount_point, const std::string &dir,
                        Headers headers = Headers());
   bool remove_mount_point(const std::string &mount_point);
@@ -798,33 +784,9 @@ enum class Error {
   Compression,
 };
 
-inline std::string to_string(const Error error) {
-  switch (error) {
-  case Error::Success: return "Success";
-  case Error::Connection: return "Connection";
-  case Error::BindIPAddress: return "BindIPAddress";
-  case Error::Read: return "Read";
-  case Error::Write: return "Write";
-  case Error::ExceedRedirectCount: return "ExceedRedirectCount";
-  case Error::Canceled: return "Canceled";
-  case Error::SSLConnection: return "SSLConnection";
-  case Error::SSLLoadingCerts: return "SSLLoadingCerts";
-  case Error::SSLServerVerification: return "SSLServerVerification";
-  case Error::UnsupportedMultipartBoundaryChars:
-    return "UnsupportedMultipartBoundaryChars";
-  case Error::Compression: return "Compression";
-  case Error::Unknown: return "Unknown";
-  default: break;
-  }
+std::string to_string(const Error error);
 
-  return "Invalid";
-}
-
-inline std::ostream &operator<<(std::ostream &os, const Error &obj) {
-  os << to_string(obj);
-  os << " (" << static_cast<std::underlying_type<Error>::type>(obj) << ')';
-  return os;
-}
+std::ostream &operator<<(std::ostream &os, const Error &obj);
 
 class Result {
 public:
@@ -1199,6 +1161,8 @@ public:
                   const std::string &client_cert_path,
                   const std::string &client_key_path);
 
+  Client(Client &&) = default;
+
   ~Client();
 
   bool is_valid() const;
@@ -1465,6 +1429,386 @@ private:
   friend class ClientImpl;
 };
 #endif
+
+/*
+ * Implementation of template methods.
+ */
+
+namespace detail {
+
+template <typename T, typename U>
+inline void duration_to_sec_and_usec(const T &duration, U callback) {
+  auto sec = std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+  auto usec = std::chrono::duration_cast<std::chrono::microseconds>(
+                  duration - std::chrono::seconds(sec))
+                  .count();
+  callback(sec, usec);
+}
+
+template <typename T>
+inline T get_header_value(const Headers & /*headers*/, const char * /*key*/,
+                          size_t /*id*/ = 0, uint64_t /*def*/ = 0) {}
+
+template <>
+inline uint64_t get_header_value<uint64_t>(const Headers &headers,
+                                           const char *key, size_t id,
+                                           uint64_t def) {
+  auto rng = headers.equal_range(key);
+  auto it = rng.first;
+  std::advance(it, static_cast<ssize_t>(id));
+  if (it != rng.second) {
+    return std::strtoull(it->second.data(), nullptr, 10);
+  }
+  return def;
+}
+
+} // namespace detail
+
+template <typename T>
+inline T Request::get_header_value(const char *key, size_t id) const {
+  return detail::get_header_value<T>(headers, key, id, 0);
+}
+
+template <typename T>
+inline T Response::get_header_value(const char *key, size_t id) const {
+  return detail::get_header_value<T>(headers, key, id, 0);
+}
+
+template <typename... Args>
+inline ssize_t Stream::write_format(const char *fmt, const Args &...args) {
+  const auto bufsiz = 2048;
+  std::array<char, bufsiz> buf;
+
+#if defined(_MSC_VER) && _MSC_VER < 1900
+  auto sn = _snprintf_s(buf.data(), bufsiz - 1, buf.size() - 1, fmt, args...);
+#else
+  auto sn = snprintf(buf.data(), buf.size() - 1, fmt, args...);
+#endif
+  if (sn <= 0) { return sn; }
+
+  auto n = static_cast<size_t>(sn);
+
+  if (n >= buf.size() - 1) {
+    std::vector<char> glowable_buf(buf.size());
+
+    while (n >= glowable_buf.size() - 1) {
+      glowable_buf.resize(glowable_buf.size() * 2);
+#if defined(_MSC_VER) && _MSC_VER < 1900
+      n = static_cast<size_t>(_snprintf_s(&glowable_buf[0], glowable_buf.size(),
+                                          glowable_buf.size() - 1, fmt,
+                                          args...));
+#else
+      n = static_cast<size_t>(
+          snprintf(&glowable_buf[0], glowable_buf.size() - 1, fmt, args...));
+#endif
+    }
+    return write(&glowable_buf[0], n);
+  } else {
+    return write(buf.data(), n);
+  }
+}
+
+inline void default_socket_options(socket_t sock) {
+  int yes = 1;
+#ifdef _WIN32
+  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<char *>(&yes),
+             sizeof(yes));
+  setsockopt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE,
+             reinterpret_cast<char *>(&yes), sizeof(yes));
+#else
+#ifdef SO_REUSEPORT
+  setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, reinterpret_cast<void *>(&yes),
+             sizeof(yes));
+#else
+  setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<void *>(&yes),
+             sizeof(yes));
+#endif
+#endif
+}
+
+template <class Rep, class Period>
+inline Server &
+Server::set_read_timeout(const std::chrono::duration<Rep, Period> &duration) {
+  detail::duration_to_sec_and_usec(
+      duration, [&](time_t sec, time_t usec) { set_read_timeout(sec, usec); });
+  return *this;
+}
+
+template <class Rep, class Period>
+inline Server &
+Server::set_write_timeout(const std::chrono::duration<Rep, Period> &duration) {
+  detail::duration_to_sec_and_usec(
+      duration, [&](time_t sec, time_t usec) { set_write_timeout(sec, usec); });
+  return *this;
+}
+
+template <class Rep, class Period>
+inline Server &
+Server::set_idle_interval(const std::chrono::duration<Rep, Period> &duration) {
+  detail::duration_to_sec_and_usec(
+      duration, [&](time_t sec, time_t usec) { set_idle_interval(sec, usec); });
+  return *this;
+}
+
+inline std::string to_string(const Error error) {
+  switch (error) {
+  case Error::Success: return "Success";
+  case Error::Connection: return "Connection";
+  case Error::BindIPAddress: return "BindIPAddress";
+  case Error::Read: return "Read";
+  case Error::Write: return "Write";
+  case Error::ExceedRedirectCount: return "ExceedRedirectCount";
+  case Error::Canceled: return "Canceled";
+  case Error::SSLConnection: return "SSLConnection";
+  case Error::SSLLoadingCerts: return "SSLLoadingCerts";
+  case Error::SSLServerVerification: return "SSLServerVerification";
+  case Error::UnsupportedMultipartBoundaryChars:
+    return "UnsupportedMultipartBoundaryChars";
+  case Error::Compression: return "Compression";
+  case Error::Unknown: return "Unknown";
+  default: break;
+  }
+
+  return "Invalid";
+}
+
+inline std::ostream &operator<<(std::ostream &os, const Error &obj) {
+  os << to_string(obj);
+  os << " (" << static_cast<std::underlying_type<Error>::type>(obj) << ')';
+  return os;
+}
+
+template <typename T>
+inline T Result::get_request_header_value(const char *key, size_t id) const {
+  return detail::get_header_value<T>(request_headers_, key, id, 0);
+}
+
+template <class Rep, class Period>
+inline void ClientImpl::set_connection_timeout(
+    const std::chrono::duration<Rep, Period> &duration) {
+  detail::duration_to_sec_and_usec(duration, [&](time_t sec, time_t usec) {
+    set_connection_timeout(sec, usec);
+  });
+}
+
+template <class Rep, class Period>
+inline void ClientImpl::set_read_timeout(
+    const std::chrono::duration<Rep, Period> &duration) {
+  detail::duration_to_sec_and_usec(
+      duration, [&](time_t sec, time_t usec) { set_read_timeout(sec, usec); });
+}
+
+template <class Rep, class Period>
+inline void ClientImpl::set_write_timeout(
+    const std::chrono::duration<Rep, Period> &duration) {
+  detail::duration_to_sec_and_usec(
+      duration, [&](time_t sec, time_t usec) { set_write_timeout(sec, usec); });
+}
+
+template <class Rep, class Period>
+inline void Client::set_connection_timeout(
+    const std::chrono::duration<Rep, Period> &duration) {
+  cli_->set_connection_timeout(duration);
+}
+
+template <class Rep, class Period>
+inline void
+Client::set_read_timeout(const std::chrono::duration<Rep, Period> &duration) {
+  cli_->set_read_timeout(duration);
+}
+
+template <class Rep, class Period>
+inline void
+Client::set_write_timeout(const std::chrono::duration<Rep, Period> &duration) {
+  cli_->set_write_timeout(duration);
+}
+
+/*
+ * Forward declarations and types that will be part of the .h file if split into
+ * .h + .cc.
+ */
+
+std::string append_query_params(const char *path, const Params &params);
+
+std::pair<std::string, std::string> make_range_header(Ranges ranges);
+
+std::pair<std::string, std::string>
+make_basic_authentication_header(const std::string &username,
+                                 const std::string &password,
+                                 bool is_proxy = false);
+
+namespace detail {
+
+std::string encode_query_param(const std::string &value);
+
+void read_file(const std::string &path, std::string &out);
+
+std::string trim_copy(const std::string &s);
+
+void split(const char *b, const char *e, char d,
+           std::function<void(const char *, const char *)> fn);
+
+bool process_client_socket(socket_t sock, time_t read_timeout_sec,
+                           time_t read_timeout_usec, time_t write_timeout_sec,
+                           time_t write_timeout_usec,
+                           std::function<bool(Stream &)> callback);
+
+socket_t create_client_socket(const char *host, int port, int address_family,
+                              bool tcp_nodelay, SocketOptions socket_options,
+                              time_t connection_timeout_sec,
+                              time_t connection_timeout_usec,
+                              time_t read_timeout_sec, time_t read_timeout_usec,
+                              time_t write_timeout_sec,
+                              time_t write_timeout_usec,
+                              const std::string &intf, Error &error);
+
+const char *get_header_value(const Headers &headers, const char *key,
+                             size_t id = 0, const char *def = nullptr);
+
+std::string params_to_query_str(const Params &params);
+
+void parse_query_text(const std::string &s, Params &params);
+
+bool parse_range_header(const std::string &s, Ranges &ranges);
+
+int close_socket(socket_t sock);
+
+ssize_t send_socket(socket_t sock, const void *ptr, size_t size, int flags);
+
+ssize_t read_socket(socket_t sock, void *ptr, size_t size, int flags);
+
+enum class EncodingType { None = 0, Gzip, Brotli };
+
+EncodingType encoding_type(const Request &req, const Response &res);
+
+class BufferStream : public Stream {
+public:
+  BufferStream() = default;
+  ~BufferStream() override = default;
+
+  bool is_readable() const override;
+  bool is_writable() const override;
+  ssize_t read(char *ptr, size_t size) override;
+  ssize_t write(const char *ptr, size_t size) override;
+  void get_remote_ip_and_port(std::string &ip, int &port) const override;
+  socket_t socket() const override;
+
+  const std::string &get_buffer() const;
+
+private:
+  std::string buffer;
+  size_t position = 0;
+};
+
+class compressor {
+public:
+  virtual ~compressor() = default;
+
+  typedef std::function<bool(const char *data, size_t data_len)> Callback;
+  virtual bool compress(const char *data, size_t data_length, bool last,
+                        Callback callback) = 0;
+};
+
+class decompressor {
+public:
+  virtual ~decompressor() = default;
+
+  virtual bool is_valid() const = 0;
+
+  typedef std::function<bool(const char *data, size_t data_len)> Callback;
+  virtual bool decompress(const char *data, size_t data_length,
+                          Callback callback) = 0;
+};
+
+class nocompressor : public compressor {
+public:
+  virtual ~nocompressor() = default;
+
+  bool compress(const char *data, size_t data_length, bool /*last*/,
+                Callback callback) override;
+};
+
+#ifdef CPPHTTPLIB_ZLIB_SUPPORT
+class gzip_compressor : public compressor {
+public:
+  gzip_compressor();
+  ~gzip_compressor();
+
+  bool compress(const char *data, size_t data_length, bool last,
+                Callback callback) override;
+
+private:
+  bool is_valid_ = false;
+  z_stream strm_;
+};
+
+class gzip_decompressor : public decompressor {
+public:
+  gzip_decompressor();
+  ~gzip_decompressor();
+
+  bool is_valid() const override;
+
+  bool decompress(const char *data, size_t data_length,
+                  Callback callback) override;
+
+private:
+  bool is_valid_ = false;
+  z_stream strm_;
+};
+#endif
+
+#ifdef CPPHTTPLIB_BROTLI_SUPPORT
+class brotli_compressor : public compressor {
+public:
+  brotli_compressor();
+  ~brotli_compressor();
+
+  bool compress(const char *data, size_t data_length, bool last,
+                Callback callback) override;
+
+private:
+  BrotliEncoderState *state_ = nullptr;
+};
+
+class brotli_decompressor : public decompressor {
+public:
+  brotli_decompressor();
+  ~brotli_decompressor();
+
+  bool is_valid() const override;
+
+  bool decompress(const char *data, size_t data_length,
+                  Callback callback) override;
+
+private:
+  BrotliDecoderResult decoder_r;
+  BrotliDecoderState *decoder_s = nullptr;
+};
+#endif
+
+// NOTE: until the read size reaches `fixed_buffer_size`, use `fixed_buffer`
+// to store data. The call can set memory on stack for performance.
+class stream_line_reader {
+public:
+  stream_line_reader(Stream &strm, char *fixed_buffer,
+                     size_t fixed_buffer_size);
+  const char *ptr() const;
+  size_t size() const;
+  bool end_with_crlf() const;
+  bool getline();
+
+private:
+  void append(char c);
+
+  Stream &strm_;
+  char *fixed_buffer_;
+  const size_t fixed_buffer_size_;
+  size_t fixed_buffer_used_size_ = 0;
+  std::string glowable_buffer_;
+};
+
+} // namespace detail
 
 
 } // namespace httplib
