@@ -1,4 +1,3 @@
-#define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "httplib.h"
 namespace httplib {
 
@@ -3157,6 +3156,10 @@ bool Server::read_content(Stream &strm, Request &req, Response &res) {
           })) {
     const auto &content_type = req.get_header_value("Content-Type");
     if (!content_type.find("application/x-www-form-urlencoded")) {
+      if (req.body.size() > CPPHTTPLIB_REQUEST_URI_MAX_LENGTH) {
+        res.status = 413; // NOTE: should be 414?
+        return false;
+      }
       detail::parse_query_text(req.body, req.params);
     }
     return true;
@@ -5186,7 +5189,7 @@ ssize_t SSLSocketStream::read(char *ptr, size_t size) {
   return -1;
 }
 
-inline ssize_t SSLSocketStream::write(const char *ptr, size_t size) {
+ssize_t SSLSocketStream::write(const char *ptr, size_t size) {
   const char *pos = ptr, *end = ptr + size;
   size_t len = std::min(size, static_cast<size_t>(1024)); // 1kb max chunk size
   if (is_writable()) {
@@ -5300,6 +5303,17 @@ SSLServer::SSLServer(X509 *cert, EVP_PKEY *private_key,
           SSL_VERIFY_PEER |
               SSL_VERIFY_FAIL_IF_NO_PEER_CERT, // SSL_VERIFY_CLIENT_ONCE,
           nullptr);
+    }
+  }
+}
+
+SSLServer::SSLServer(
+    const std::function<bool(SSL_CTX &ssl_ctx)> &setup_ssl_ctx_callback) {
+  ctx_ = SSL_CTX_new(TLS_method());
+  if (ctx_) {
+    if (!setup_ssl_ctx_callback(*ctx_)) {
+      SSL_CTX_free(ctx_);
+      ctx_ = nullptr;
     }
   }
 }
