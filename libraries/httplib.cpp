@@ -5187,29 +5187,42 @@ ssize_t SSLSocketStream::read(char *ptr, size_t size) {
 }
 
 inline ssize_t SSLSocketStream::write(const char *ptr, size_t size) {
+  const char *pos = ptr, *end = ptr + size;
+  size_t len = std::min(size, static_cast<size_t>(1024)); // 1kb max chunk size
   if (is_writable()) {
-    auto ret = SSL_write(ssl_, ptr, static_cast<int>(size));
-    if (ret < 0) {
-      auto err = SSL_get_error(ssl_, ret);
-      int n = 1000;
+    int ret = 0; // chunk bytes sent
+    int fret = 0; // final return bytes
+    int err = SSL_ERROR_WANT_WRITE; // SSL error
+
+    int n = 1000;
 #ifdef _WIN32
-      while (--n >= 0 &&
-             (err == SSL_ERROR_WANT_WRITE ||
-              err == SSL_ERROR_SYSCALL && WSAGetLastError() == WSAETIMEDOUT)) {
+    while (--n >= 0 &&
+            (err == SSL_ERROR_WANT_WRITE ||
+            err == SSL_ERROR_SYSCALL && WSAGetLastError() == WSAETIMEDOUT)) {
 #else
-      while (--n >= 0 && err == SSL_ERROR_WANT_WRITE) {
+    while (--n >= 0 && err == SSL_ERROR_WANT_WRITE) {
 #endif
-        if (is_writable()) {
-          std::this_thread::sleep_for(std::chrono::milliseconds(1));
-          ret = SSL_write(ssl_, ptr, static_cast<int>(size));
-          if (ret >= 0) { return ret; }
-          err = SSL_get_error(ssl_, ret);
-        } else {
-          return -1;
+      if (is_writable()) {
+        ret = SSL_write(ssl_, pos, static_cast<int>(len));
+        if (ret >= 0) { // on success
+          n = 1000; // reset retries
+          fret += ret; // delta bytes written
+          pos += ret; // delta read position
+          size -= ret; // delta read size
+          len = std::min(size, static_cast<size_t>(1024)); // 1kb max chunk size
+
+          if(pos < end){
+            err = SSL_ERROR_WANT_WRITE; // force write more bytes
+            continue;
+          }
+          return fret;
         }
+        err = SSL_get_error(ssl_, ret);
+      } else {
+        return -1;
       }
     }
-    return ret;
+    return fret;
   }
   return -1;
 }
