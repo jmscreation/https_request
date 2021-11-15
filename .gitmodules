@@ -1,0 +1,6 @@
+[submodule "libraries/json-loader"]
+	path = libraries/json-loader
+	url = https://github.com/jmscreation/json-loader
+[submodule "libraries/libopenssl"]
+	path = libraries/libopenssl
+	url = https://github.com/jmscreation/libopenssl
