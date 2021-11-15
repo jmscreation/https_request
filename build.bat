@@ -173,8 +173,6 @@ if %count%==0 (
 
 set "files="
 
-echo %OBJECT_DIRS%
-
 :: Find All Object Files
 (for %%D in (%OBJECT_DIRS%) do (
 	if exist %%D\ (
@@ -186,9 +184,9 @@ echo %OBJECT_DIRS%
 echo Linking Executable...
 
 if %COMMANDLINE% GTR 0 (
-	set MWINDOWS=-mwindows
-) else (
 	set MWINDOWS=
+) else (
+	set MWINDOWS=-mwindows
 )
 
 if %VERBOSE% GTR 0 (
