@@ -123,7 +123,25 @@ set OBJECT_DIRS=
 		)
 	)
 ))
+(for %%D in (%LIBRARY_SOURCE_DIRECTORIES%) do (
+	if exist %%D\ (
+		if not exist %%D\%OBJECT_DIRECTORY% (
+			echo Creating Object Directory Structure...
+			mkdir %%D\%OBJECT_DIRECTORY%
+		)
+	)
+))
 
+
+(for %%D in (%LIBRARY_SOURCE_DIRECTORIES%) do (
+	echo Building Library Files For %%D...
+	if exist %%D\ (
+		call :compile_function %%D cpp %CPP% "%CPP_COMPILER_FLAGS%"
+		call :compile_function %%D c %GCC% "%C_COMPILER_FLAGS%"
+	) else (
+		echo Skipping non-existent directory...
+	)
+))
 
 (for %%D in (%SOURCE_DIRECTORIES%) do (
 	echo Building Source Files For %%D...
@@ -142,7 +160,7 @@ goto loop
 	set OBJ_DIR=%1\%OBJECT_DIRECTORY%
 	set /a n=0
 	for /R %1 %%F in (*.%2) do (
-		if not exist !OBJ_DIR!\%%~nF!n!.o (
+		if not exist !OBJ_DIR!\%~n3_%%~nF!n!.o (
 			echo Building %~n3_%%~nF!n!.o
 			start /B %WAIT% "%%~nF!n!.o" %3 %ADDITIONAL_INCLUDEDIRS% %~4 %DEBUG_INFO% -c %%F -o !OBJ_DIR!\%~n3_%%~nF!n!.o
 
