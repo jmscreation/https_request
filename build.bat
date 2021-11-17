@@ -22,9 +22,9 @@ set REBUILD_SOURCE_LIBRARIES=0
 set ASYNC_BUILD=1
 
 :: Configure Source For Compiling And Additional Custom Library Directories / Names
-set SOURCE_DIRECTORIES=src libraries\srclibs
-set INCLUDE_DIRECTORIES=libraries\srclibs
-set LIBRARY_DIRECTORIES=libraries\json-loader\librapidjson libraries\json-loader libraries\libopenssl
+set SOURCE_DIRECTORIES=src srclibs
+set INCLUDE_DIRECTORIES=srclibs
+set LIBRARY_DIRECTORIES=libraries\librapidjson-main libraries\libjsonloader-class libraries\libopenssl-main
 set LIBRARY_NAMES=ssl64 crypto64 gdi32 crypt32 ws2_32
 
 :: Custom Library Support Directory Names
